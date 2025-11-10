@@ -2,7 +2,7 @@ flask
 flask-sqlalchemy
 flask-migrate
 python-dotenv
-psycopg
+psycopg[binary]
 google-api-python-client
 google-auth-httplib2
 google-auth-oauthlib
