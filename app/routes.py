@@ -1,35 +1,18 @@
 import os
-from dotenv import load_dotenv
-load_dotenv()
-from flask import Flask, request, jsonify
-from flask_migrate import Migrate
-from models import db, Meeting, Transcript, ActionItem
-import google_client
-import action_extractor
+from flask import Blueprint, request, jsonify
+from app import db
+from app.models import Meeting, Transcript, ActionItem
+from app import google_client
+from app import action_extractor
 
-app = Flask(__name__)
+main = Blueprint('main', __name__)
 
-# --- 1. Configuration ---
-# We use an environment variable for the database URL.
-# This is best practice and keeps your password out of the code.
-DATABASE_URL = os.environ.get('DATABASE_URL')
-if not DATABASE_URL:
-    raise RuntimeError("DATABASE_URL environment variable is not set.")
-
-app.config['SQLALCHEMY_DATABASE_URI'] = DATABASE_URL
-app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
-
-# --- 2. Database Initialization ---
-db.init_app(app)
-migrate = Migrate(app, db) # Initialize Flask-Migrate
-
-# --- 3. API Routes ---
-@app.route('/')
+@main.route('/')
 def home():
     """A simple route to check if the server is running."""
     return f"{os.environ.get('APP_NAME')} is running..."
 
-@app.route('/api/meetings/<int:meeting_id>', methods=['GET'])
+@main.route('/api/meetings/<int:meeting_id>', methods=['GET'])
 def get_meeting_details(meeting_id):
     """
     Gets a specific meeting and its transcript.
@@ -46,7 +29,7 @@ def get_meeting_details(meeting_id):
         "transcript_content": meeting.transcript.content[:200] + "..." # Show a preview
     })
 
-@app.route('/api/meetings/<int:meeting_id>/action-items', methods=['GET'])
+@main.route('/api/meetings/<int:meeting_id>/action-items', methods=['GET'])
 def get_action_items_for_meeting(meeting_id):
     """
     Gets all action items for a specific meeting ID.
@@ -80,7 +63,7 @@ def get_action_items_for_meeting(meeting_id):
         "action_items": action_items_list
     })
 
-@app.route('/api/process-newest-transcript', methods=['POST'])
+@main.route('/api/process-newest-transcript', methods=['POST'])
 def process_newest_transcript():
     """
     API endpoint to poll a Google Drive folder, get the newest transcript,
@@ -156,6 +139,3 @@ def process_newest_transcript():
             print(f"Cleaned up partial meeting entry {new_meeting.id}.")
 
         return jsonify({"error": "Failed to save transcript to database."}), 500
-
-if __name__ == '__main__':
-    app.run(debug=True)

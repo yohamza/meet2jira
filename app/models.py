@@ -1,8 +1,4 @@
-from flask_sqlalchemy import SQLAlchemy
-import datetime
-
-# Initialize the database extension
-db = SQLAlchemy()
+from app import db
 
 class Meeting(db.Model):
     """
