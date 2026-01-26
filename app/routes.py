@@ -4,6 +4,7 @@ from app import db
 from app.models import Meeting, Transcript, ActionItem
 from app import google_client
 from app import action_extractor
+from app import jira_client
 
 main = Blueprint('main', __name__)
 
@@ -71,17 +72,31 @@ def process_newest_transcript():
     
     Expects JSON body: {"folder_id": "YOUR_FOLDER_ID"}
     """
-    data = request.get_json()
-    if not data or 'folder_id' not in data:
-        return jsonify({"error": "Missing 'folder_id' in request body"}), 400
+    data = request.get_json() or {}
+    
+    # if not data or 'folder_id' not in data:
+    #     return jsonify({"error": "Missing 'folder_id' in request body"}), 400
 
-    folder_id = data['folder_id']
+    doc_name = None
+    transcript_text = None
 
-    # 1. Fetch the newest transcript text from Google Drive
-    print(f"Polling Drive folder {folder_id} for newest transcript...")
-    doc_name, transcript_text = google_client.get_transcript_from_folder(folder_id)
+    # Case A: User provided a direct URL
+    if 'doc_url' in data:
+        url = data['doc_url']
+        print(f"Processing direct URL: {url}")
+        doc_id = google_client.extract_id_from_url(url)
+        
+        if not doc_id:
+            return jsonify({"error": "Invalid Google Doc URL format."}), 400
+            
+        doc_name, transcript_text = google_client.get_transcript_by_id(doc_id)
 
-    print(f"Fetched document: {doc_name}")
+    # Case B: User provided a folder OR we default to root
+    else:
+        folder_id = data.get('folder_id', 'root') # Default to root if missing
+        print(f"Polling folder '{folder_id}' for newest transcript...")
+        doc_name, transcript_text = google_client.get_transcript_from_folder(folder_id)
+
 
     if transcript_text is None:
         return jsonify({"error": f"Could not fetch any new transcript from folder {folder_id}"}), 404
@@ -119,6 +134,17 @@ def process_newest_transcript():
             # Commit the new action items to the database
             db.session.commit()
             print(f"Saved {len(action_items_list)} new action items.")
+
+        ticket_notes = action_extractor.extract_jira_ticket_notes(transcript_text)
+        if ticket_notes:
+            if jira_client.is_configured():
+                try:
+                    posted = jira_client.post_ticket_notes(ticket_notes, meeting_title=doc_name)
+                    print(f"Posted Jira comments for {len(posted)} tickets.")
+                except Exception as e:
+                    print(f"Failed to post Jira comments: {e}")
+            else:
+                print("Jira not configured; skipping comment posting.")
 
 
         return jsonify({

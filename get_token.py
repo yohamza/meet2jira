@@ -4,7 +4,10 @@ from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
 
 # This is the permission we need: to read files from your Google Drive.
-SCOPES = ['https://www.googleapis.com/auth/drive.readonly']
+SCOPES = [
+    'https://www.googleapis.com/auth/drive.readonly',
+    'https://www.googleapis.com/auth/gmail.readonly'
+]
 
 def main():
     """
