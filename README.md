@@ -1,20 +1,21 @@
-# MeetX (PostgreSQL Version)
+# MEET2JIRA
 
 This project is a Python-based application that automatically extracts action items from Google Meet transcripts stored in Google Drive. It uses the OpenAI API to analyze the transcripts and saves the meetings, transcripts, and extracted action items into a PostgreSQL database.
 
 ## Features
 
-*   **Google Drive Integration:** Polls a specified Google Drive folder for the newest Google Doc transcript.
+*   **Google Drive Integration:** Polls a specified Google Drive folder (or root) for the newest Google Doc transcript.
 *   **AI-Powered Action Item Extraction:** Uses OpenAI's `gpt-4o-mini` to intelligently parse transcripts and extract action items, including descriptions and assignees.
 *   **Database Storage:** Saves all data to a PostgreSQL database using SQLAlchemy.
 *   **REST API:** Provides a simple Flask-based API to trigger the process and retrieve data.
-*   **OAuth 2.0 Authentication:** Securely connects to the Google Drive API.
+*   **OAuth 2.0 Authentication:** Securely connects to the Google Drive and Gmail APIs.
 *   **Database Migrations:** Uses Flask-Migrate (Alembic) to manage database schema changes.
+*   **Dashboard UI:** A simple `/dashboard` page to view meetings, tasks, and assignees.
 
 ## How It Works
 
 1.  **Authentication:** The first time you use the app, you run `get_token.py` to authenticate with your Google account and authorize read-only access to your Google Drive. This creates a `token.json` file.
-2.  **API Call:** You send a `POST` request to the `/api/process-newest-transcript` endpoint, providing a Google Drive folder ID.
+2.  **API Call:** You send a `POST` request to the `/api/process-newest-transcript` endpoint. You can provide a Google Drive folder ID, a Google Doc URL, or send an empty body to default to root.
 3.  **Fetch Transcript:** The application uses the Google Drive API to find the most recent Google Doc in that folder and downloads its content as plain text.
 4.  **Extract Action Items:** The transcript text is sent to the OpenAI API. A carefully crafted prompt instructs the model to find and return a structured JSON list of action items.
 5.  **Save to Database:** The application creates a new `Meeting` record, saves the `Transcript`, and stores each extracted `ActionItem` in the PostgreSQL database, linking them all together.
@@ -24,7 +25,7 @@ This project is a Python-based application that automatically extracts action it
 1.  **Clone the repository:**
     ```bash
     git clone <repository-url>
-    cd meetx
+    cd meet2jira
     ```
 
 2.  **Create a virtual environment:**
@@ -40,7 +41,7 @@ This project is a Python-based application that automatically extracts action it
 
 4.  **Set up Google API Credentials:**
     *   Go to the [Google Cloud Console](https://console.cloud.google.com/) and create a new project.
-    *   Enable the "Google Drive API".
+    *   Enable the "Google Drive API" and "Gmail API".
     *   Create OAuth 2.0 credentials for a "Desktop app".
     *   Download the credentials JSON file and save it as `credentials.json` in the project root.
 
@@ -60,7 +61,7 @@ This project is a Python-based application that automatically extracts action it
         ```
 
 7.  **Run Initial Authentication:**
-    *   Run the `get_token.py` script once to authorize Google Drive access. This will open a browser window for you to log in.
+    *   Run the `get_token.py` script once to authorize Google access. This opens a browser for login; in headless environments it falls back to a console prompt.
     ```bash
     python get_token.py
     ```
@@ -87,12 +88,25 @@ This project is a Python-based application that automatically extracts action it
       -d '{"folder_id": "YOUR_FOLDER_ID"}' \
       http://127.0.0.1:5000/api/process-newest-transcript
     ```
+    *   Or pass a direct Google Doc URL:
+    ```bash
+    curl -X POST -H "Content-Type: application/json" \
+      -d '{"doc_url": "https://docs.google.com/document/d/<DOC_ID>/edit"}' \
+      http://127.0.0.1:5000/api/process-newest-transcript
+    ```
+    *   Or send an empty body to use root:
+    ```bash
+    curl -X POST http://127.0.0.1:5000/api/process-newest-transcript
+    ```
+
+3.  **Open the Dashboard:**
+    *   Visit `http://127.0.0.1:5000/dashboard` to view meetings, tasks, and assignees.
 
 ## API Endpoints
 
 *   `POST /api/process-newest-transcript`
     *   Triggers the process of fetching the newest transcript from a Google Drive folder, extracting action items, and saving everything to the database.
-    *   **Request Body:** `{"folder_id": "your-google-drive-folder-id"}`
+    *   **Request Body (optional):** `{"folder_id": "your-google-drive-folder-id"}` or `{"doc_url": "https://docs.google.com/document/d/<DOC_ID>/edit"}`. If omitted, defaults to root.
     *   **Success Response (201):**
         ```json
         {
