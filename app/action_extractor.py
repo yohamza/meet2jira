@@ -74,64 +74,7 @@ def extract_action_items(transcript_text):
         print(f"An error occurred while calling OpenAI: {e}")
         return []
 
-TICKET_ID_RE = re.compile(r"\b([A-Z][A-Z0-9]+-\d+)\b")
-CONTINUATION_RE = re.compile(r"^\s*(?:[-*]|\d+[\.\)])\s+")
-
-def _is_continuation_line(line):
-    if not line:
-        return False
-    if CONTINUATION_RE.match(line):
-        return True
-    lower = line.lower()
-    return lower.startswith(("action:", "action item", "actions:", "discussion:", "notes:", "decision:"))
-
-def _normalize_note(lines):
-    cleaned = []
-    for line in lines:
-        text = line.strip()
-        if not text:
-            continue
-        cleaned.append(text)
-    return "\n".join(cleaned)
-
-def extract_jira_ticket_notes_regex(transcript_text):
-    """
-    Extracts Jira ticket IDs and nearby notes using simple heuristics.
-    Returns a dict: { "PROJ-123": ["note1", "note2"] }.
-    """
-    lines = transcript_text.splitlines()
-    notes_by_ticket = {}
-
-    for idx, raw_line in enumerate(lines):
-        line = raw_line.strip()
-        if not line:
-            continue
-
-        tickets = TICKET_ID_RE.findall(line)
-        if not tickets:
-            continue
-
-        collected = [line]
-        j = idx + 1
-        while j < len(lines):
-            next_line = lines[j].strip()
-            if not next_line:
-                break
-            if TICKET_ID_RE.search(next_line):
-                break
-            if _is_continuation_line(next_line):
-                collected.append(next_line)
-                j += 1
-                continue
-            break
-
-        note = _normalize_note(collected)
-        for ticket in tickets:
-            notes_by_ticket.setdefault(ticket, [])
-            if note and note not in notes_by_ticket[ticket]:
-                notes_by_ticket[ticket].append(note)
-
-    return notes_by_ticket
+TICKET_VALIDATION_RE = re.compile(r"\b[A-Z][A-Z0-9]+-\d+\b", re.IGNORECASE)
 
 def extract_jira_ticket_notes_ai(transcript_text):
     """
@@ -145,14 +88,21 @@ def extract_jira_ticket_notes_ai(transcript_text):
     default_project = current_app.config.get('JIRA_DEFAULT_PROJECT', 'IWMP')
 
     system_prompt = f"""
-    You are an expert Project Manager assistant. Your task is to extract Jira ticket updates from a meeting transcript.
+    You are technical Project Manager. Your task is to extract Jira ticket updates from a meeting transcript.
 
-    CRITICAL RULE FOR TICKET IDs:
+    ### INSTRUCTIONS
+    - Scan the transcript for mentions of specific Jira tickets or issue numbers.
+    - If a number is mentioned in the context of a bug/task (e.g., "ticket 991", "issue 50"), attach the prefix "{default_project}-".
+    - Extract the update/note for that specific ticket.
     - The team often refers to tickets by number only (e.g., "look at 991" or "ticket 400").
     - If you see a number discussed as a task/issue, assume it belongs to the project "{default_project}".
     - Example: "Fix 991" -> Ticket ID: "{default_project}-991"
-    - Example: "IWMP-102 is done" -> Ticket ID: "IWMP-102"
+    - Example: "{default_project}-102 is done" -> Ticket ID: "{default_project}-102"
     - Do NOT create tickets for monetary values or generic numbers (e.g. "$500", "500 users").
+    - **DO NOT** create tickets for general action items. Only extract if a specific number/ID was spoken.
+    - **DO NOT** invent sequential numbers (like 400, 401, 402) if they were not in the text.
+    - If no tickets were mentioned, return an empty object: {{}}
+
 
     OUTPUT FORMAT:
     Return ONLY a valid JSON object.
@@ -162,7 +112,7 @@ def extract_jira_ticket_notes_ai(transcript_text):
     Example JSON:
     {{
       "{default_project}-123": ["John will fix the CSS bug.", "Needs to be deployed by Friday."],
-      "IWMP-50": ["Discussed the API timeout issue."]
+      "{default_project}-50": ["Discussed the API timeout issue."]
     }}
     """
 
@@ -170,6 +120,7 @@ def extract_jira_ticket_notes_ai(transcript_text):
         completion = client.chat.completions.create(
             model="gpt-4o-mini",
             response_format={"type": "json_object"},
+            temperature=0.0,
             messages=[
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": transcript_text}
@@ -177,17 +128,16 @@ def extract_jira_ticket_notes_ai(transcript_text):
         )
         response_text = completion.choices[0].message.content
         data = json.loads(response_text)
-        return {
-            key: value if isinstance(value, list) else [str(value)]
-            for key, value in data.items()
-            if isinstance(key, str) and TICKET_ID_RE.fullmatch(key)
-        }
+        validated_data = {}
+        for key, value in data.items():
+            # Ensure key is a string and looks like a Ticket ID
+            if isinstance(key, str) and TICKET_VALIDATION_RE.fullmatch(key):
+                key = key.upper()
+                # Ensure value is a list of strings
+                notes = value if isinstance(value, list) else [str(value)]
+                validated_data[key] = notes
+        
+        return validated_data
     except Exception as e:
         print(f"An error occurred while calling OpenAI for Jira notes: {e}")
         return {}
-
-def extract_jira_ticket_notes(transcript_text):
-    """
-    Wrapper to choose regex or AI-based extraction.
-    """
-    return extract_jira_ticket_notes_ai(transcript_text)

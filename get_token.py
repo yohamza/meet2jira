@@ -23,16 +23,32 @@ def main():
 
     # If there are no (valid) credentials available, let the user log in.
     if not creds or not creds.valid:
+        refreshed = False
         if creds and creds.expired and creds.refresh_token:
-            print("Credentials expired. Refreshing...")
-            creds.refresh(Request())
-        else:
-            print("No valid credentials. Starting authentication flow...")
+            print("Credentials expired. Attempting refresh...")
+            try:
+                creds.refresh(Request())
+                refreshed = True
+                print("Credentials refreshed successfully.")
+            except Exception as e:
+                print(f"Refresh failed: {e}")
+
+        if not refreshed:
+            if creds and creds.expired:
+                print("Token expired and refresh is not possible. Please log in again.")
+            else:
+                print("No valid credentials. Starting authentication flow...")
+
             # This line reads your credentials.json
             flow = InstalledAppFlow.from_client_secrets_file(
                 'credentials.json', SCOPES)
-            # This line opens your browser for you
-            creds = flow.run_local_server(port=0)
+            # Try browser-based flow first; fall back to console flow if needed.
+            try:
+                creds = flow.run_local_server(port=0, open_browser=True)
+            except Exception as e:
+                print(f"Browser login failed: {e}")
+                print("Falling back to console-based login. Follow the URL and paste the code here.")
+                creds = flow.run_console()
         
         # Save the credentials for the next run
         with open('token.json', 'w') as token:
@@ -40,7 +56,7 @@ def main():
         print("Saved new credentials to 'token.json'.")
 
     print("\nAuthentication successful!")
-    print("You can now run the main 'app.py' server.")
+    print("You can now run the main 'run.py' server.")
 
 if __name__ == '__main__':
     main()

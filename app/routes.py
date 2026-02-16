@@ -1,5 +1,5 @@
 import os
-from flask import Blueprint, request, jsonify
+from flask import Blueprint, request, jsonify, render_template
 from app import db
 from app.models import Meeting, Transcript, ActionItem
 from app import google_client
@@ -13,6 +13,35 @@ def home():
     """A simple route to check if the server is running."""
     return f"{os.environ.get('APP_NAME')} is running..."
 
+@main.route('/dashboard', methods=['GET'])
+def dashboard():
+    """
+    Simple UI to show meetings, tasks, and assignees.
+    """
+    meetings = Meeting.query.order_by(Meeting.processed_at.desc()).all()
+    meeting_cards = []
+
+    for meeting in meetings:
+        transcript_preview = None
+        if meeting.transcript and meeting.transcript.content:
+            transcript_preview = meeting.transcript.content[:300] + "..."
+
+        action_items = (
+            meeting.action_items.order_by(ActionItem.created_at.desc()).all()
+            if hasattr(meeting.action_items, "order_by")
+            else meeting.action_items
+        )
+
+        meeting_cards.append({
+            "id": meeting.id,
+            "meeting_code": meeting.meeting_code,
+            "processed_at": meeting.processed_at,
+            "transcript_preview": transcript_preview,
+            "action_items": action_items,
+        })
+
+    return render_template("dashboard.html", meetings=meeting_cards)
+
 @main.route('/api/meetings/<int:meeting_id>', methods=['GET'])
 def get_meeting_details(meeting_id):
     """
@@ -23,11 +52,15 @@ def get_meeting_details(meeting_id):
     if not meeting:
         return jsonify({"error": "Meeting not found"}), 404
         
+    transcript_preview = None
+    if meeting.transcript and meeting.transcript.content:
+        transcript_preview = meeting.transcript.content[:200] + "..."
+
     return jsonify({
         "meeting_id": meeting.id,
         "meeting_code": meeting.meeting_code,
         "processed_at": meeting.processed_at,
-        "transcript_content": meeting.transcript.content[:200] + "..." # Show a preview
+        "transcript_content": transcript_preview
     })
 
 @main.route('/api/meetings/<int:meeting_id>/action-items', methods=['GET'])
@@ -72,13 +105,14 @@ def process_newest_transcript():
     
     Expects JSON body: {"folder_id": "YOUR_FOLDER_ID"}
     """
-    data = request.get_json() or {}
+    data = request.get_json(silent=True) or {}
     
     # if not data or 'folder_id' not in data:
     #     return jsonify({"error": "Missing 'folder_id' in request body"}), 400
 
     doc_name = None
     transcript_text = None
+    folder_id = None
 
     # Case A: User provided a direct URL
     if 'doc_url' in data:
@@ -99,7 +133,8 @@ def process_newest_transcript():
 
 
     if transcript_text is None:
-        return jsonify({"error": f"Could not fetch any new transcript from folder {folder_id}"}), 404
+        source = f"folder {folder_id}" if folder_id else "the provided URL"
+        return jsonify({"error": f"Could not fetch any new transcript from {source}"}), 404
 
     # 2. Check if we already processed this file (using the doc name)
     existing_meeting = Meeting.query.filter_by(meeting_code=doc_name).first()
@@ -110,6 +145,7 @@ def process_newest_transcript():
         }), 200 # 200 OK, since it's not an error
 
     # 3. Save the new transcript to the database
+    new_meeting = None
     try:
         new_meeting = Meeting(meeting_code=doc_name)
         new_transcript = Transcript(content=transcript_text, meeting=new_meeting)
@@ -135,8 +171,9 @@ def process_newest_transcript():
             db.session.commit()
             print(f"Saved {len(action_items_list)} new action items.")
 
-        ticket_notes = action_extractor.extract_jira_ticket_notes(transcript_text)
+        ticket_notes = action_extractor.extract_jira_ticket_notes_ai(transcript_text)
         if ticket_notes:
+            print(f"Extracted notes for {len(ticket_notes)} Jira tickets.")
             if jira_client.is_configured():
                 try:
                     posted = jira_client.post_ticket_notes(ticket_notes, meeting_title=doc_name)
